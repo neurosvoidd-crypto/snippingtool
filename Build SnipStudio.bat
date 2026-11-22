@@ -10,6 +10,7 @@ if not exist assets\ffmpeg.exe (
 )
 echo Installing Windows target if needed...
 rustup target add x86_64-pc-windows-msvc
+if errorlevel 1 (echo Failed to add the Windows MSVC target. & pause & exit /b 1)
 echo Building optimized Windows executable...
 cargo build --release --target x86_64-pc-windows-msvc
 if errorlevel 1 (echo Build failed. Ensure the MSVC C++ Build Tools are installed. & pause & exit /b 1)

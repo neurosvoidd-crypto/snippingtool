@@ -1,0 +1,80 @@
+name: Build SnipStudio for Windows (Rust MSVC)
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-msvc:
+    name: Windows x64 / MSVC
+    runs-on: windows-2022
+    timeout-minutes: 55
+    defaults:
+      run:
+        shell: pwsh
+
+    steps:
+      - name: Check out the project
+        uses: actions/checkout@v4
+
+      - name: Install stable Rust with the Windows MSVC target
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Set up Microsoft Visual C++ compiler and linker
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: amd64
+
+      - name: Verify the toolchain
+        run: |
+          rustc --version
+          cargo --version
+          rustup show active-toolchain
+          where.exe cl
+          where.exe link
+
+      - name: Check Rust code for Windows
+        run: cargo check --target x86_64-pc-windows-msvc
+
+      - name: Download FFmpeg for the standalone recorder
+        run: |
+          New-Item -ItemType Directory -Force -Path assets | Out-Null
+          $output = Join-Path $env:RUNNER_TEMP 'ffmpeg-release-essentials.zip'
+          $unpack = Join-Path $env:RUNNER_TEMP 'snipstudio-ffmpeg'
+          Invoke-WebRequest -Uri 'https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip' -OutFile $output
+          Expand-Archive -Path $output -DestinationPath $unpack -Force
+          $ffmpeg = Get-ChildItem -Path $unpack -Filter 'ffmpeg.exe' -Recurse -File | Select-Object -First 1
+          if (-not $ffmpeg) { throw 'FFmpeg executable was not found in the downloaded archive.' }
+          Copy-Item -Path $ffmpeg.FullName -Destination 'assets/ffmpeg.exe' -Force
+          if ((Get-Item 'assets/ffmpeg.exe').Length -lt 1000000) { throw 'Downloaded FFmpeg executable is unexpectedly small.' }
+          & 'assets/ffmpeg.exe' -version | Select-Object -First 1
+
+      - name: Build release EXE for Windows x64
+        run: cargo build --release --target x86_64-pc-windows-msvc
+
+      - name: Verify Windows executable and stage output
+        run: |
+          $exe = 'target/x86_64-pc-windows-msvc/release/snipstudio.exe'
+          if (-not (Test-Path $exe)) { throw 'Rust build did not produce snipstudio.exe.' }
+          $bytes = [System.IO.File]::ReadAllBytes((Resolve-Path $exe))
+          if ($bytes.Length -lt 100000 -or $bytes[0] -ne 0x4D -or $bytes[1] -ne 0x5A) {
+            throw 'Expected a Windows PE executable beginning with MZ.'
+          }
+          New-Item -ItemType Directory -Force -Path publish | Out-Null
+          Copy-Item $exe 'publish/SnipStudio.exe' -Force
+          Write-Host ('Built publish/SnipStudio.exe ({0:N0} bytes)' -f $bytes.Length)
+
+      - name: Upload SnipStudio Windows executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: SnipStudio-Windows-x64-MSVC
+          path: publish/SnipStudio.exe
+          if-no-files-found: error
+          retention-days: 14

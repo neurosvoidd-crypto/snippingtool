@@ -1,0 +1,5 @@
+target/
+publish/
+assets/ffmpeg.exe
+assets/ffmpeg.zip
+assets/ffmpeg_unpack/
